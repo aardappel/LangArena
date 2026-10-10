@@ -1,17 +1,13 @@
-// Compress::ArithEncode and Compress::ArithDecode: a 32-bit integer
-// arithmetic coder over the byte frequencies of its input, with the
-// pending-bit (E3) scaling of the classic Witten-Neal-Cleary coder.
-
 namespace arith;
 
 import std;
 import bench;
 import compress_data;
 
-// The coded bits and the frequencies the decoder needs to rebuild the model.
 struct ArithEncodedResult { frequencies: i32[256], data: u8[>..] }
 
-// Cumulative frequencies: symbol s owns [low[s], high[s]) of [0, total).
+fn new_arith_encoded_result() -> ArithEncodedResult { ArithEncodedResult { frequencies: [0; 256], data: [] } }
+
 struct ArithFreqTable { total: i32, low: i32[256], high: i32[256] }
 
 fn new_arith_freq_table(frequencies: i32[:]) -> ArithFreqTable {
@@ -29,11 +25,6 @@ fn new_arith_freq_table(frequencies: i32[:]) -> ArithFreqTable {
     return ArithFreqTable { total: total, low: low, high: high };
 }
 
-// --- encoding -----------------------------------------------------------------
-
-// Bits are packed most significant first. Goose has no move for a growable
-// array, so the stream writes into the array its owner hands it (the
-// result's data) instead of giving its own bytes away at flush.
 struct BitOutputStream { buffer: u8, bit_pos: i32, bytes: u8[>..]&, bits_written: i32 }
 
 fn new_bit_output_stream(bytes: u8[>..]&) -> BitOutputStream {
@@ -70,7 +61,7 @@ fn arith_encode(data: u8[:]) -> ArithEncodedResult {
     var low: u64 = 0;
     var high: u64 = 0xFFFFFFFF;
     var pending = 0;
-    // The result is built where it is returned to, its bytes in place.
+
     var encoded = ArithEncodedResult { frequencies: frequencies, data: [] };
     var output = new_bit_output_stream(encoded.data);
 
@@ -127,20 +118,26 @@ fn arith_encode(data: u8[:]) -> ArithEncodedResult {
     return encoded;
 }
 
-fn run_encode(b: Bench&) -> u32 {
-    let test_data = ::generate_test_data(config_i64(b.name, "size"));
-    var encoded = ArithEncodedResult { frequencies: [0; 256], data: [] };
-    var result_val: u32 = 0;
-    measure(b) {
-        encoded = arith_encode(test_data);
-        result_val += encoded.data.len as! u32;
-    };
-    return result_val;
+struct ArithEncode { size_val: i64, result_val: u32, test_data: u8[>..<]&, encoded: ArithEncodedResult }
+
+fn new_arith_encode(test_data: u8[>..<]&) -> ArithEncode {
+    ArithEncode {
+        size_val: config_i64("Compress::ArithEncode", "size"),
+        result_val: 0,
+        test_data: test_data,
+        encoded: new_arith_encoded_result(),
+    }
 }
 
-// --- decoding -----------------------------------------------------------------
+fn prepare(s: ArithEncode&) { s.test_data = ::generate_test_data(s.size_val); }
 
-// Reads the bits back most significant first; past the end it reads zeros.
+fn run(s: ArithEncode&, iteration_id: i64) {
+    s.encoded = arith_encode(s.test_data);
+    s.result_val += s.encoded.data.len as! u32;
+}
+
+fn checksum(s: ArithEncode&) -> u32 { s.result_val }
+
 struct BitInputStream { bytes: const u8[:], byte_pos: i64, bit_pos: i32, current_byte: u8 }
 
 fn new_bit_input_stream(bytes: const u8[:]) -> BitInputStream {
@@ -221,16 +218,44 @@ fn arith_decode(encoded: ArithEncodedResult&) -> u8[>..] {
     return result;
 }
 
-fn run_decode(b: Bench&) -> u32 {
-    let test_data = ::generate_test_data(config_i64(b.name, "size"));
-    // ArithEncode's prepare and run(0), on this benchmark's test data.
-    let encoded = arith_encode(test_data);
-    var decoded: u8[>..] = [];
-    var result_val: u32 = 0;
-    measure(b) {
-        decoded = arith_decode(encoded);
-        result_val += decoded.len as! u32;
-    };
-    if decoded == test_data { result_val += 100000; }
-    return result_val;
+struct ArithDecode {
+    size_val: i64,
+    result_val: u32,
+    test_data: u8[>..<]&,
+    encoded: ArithEncodedResult&,
+    decoded: u8[>..],
+}
+
+fn new_arith_decode(test_data: u8[>..<]&, encoded: ArithEncodedResult&) -> ArithDecode {
+    ArithDecode {
+        size_val: config_i64("Compress::ArithDecode", "size"),
+        result_val: 0,
+        test_data: test_data,
+        encoded: encoded,
+        decoded: [],
+    }
+}
+
+fn prepare(s: ArithDecode&) {
+    s.test_data = ::generate_test_data(s.size_val);
+
+    var encoder_test_data: u8[>..<] = [];
+    var encoder = new_arith_encode(encoder_test_data);
+    encoder.size_val = s.size_val;
+    encoder.prepare();
+    encoder.test_data = copy(s.test_data);
+    encoder.run(0);
+
+    s.encoded = copy(encoder.encoded);
+}
+
+fn run(s: ArithDecode&, iteration_id: i64) {
+    s.decoded = arith_decode(s.encoded);
+    s.result_val += s.decoded.len as! u32;
+}
+
+fn checksum(s: ArithDecode&) -> u32 {
+    var res = s.result_val;
+    if s.decoded == s.test_data { res += 100000; }
+    return res;
 }

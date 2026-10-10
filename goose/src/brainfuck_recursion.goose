@@ -1,6 +1,3 @@
-// Brainfuck::Recursion: the program parsed into a tree of ops, every loop
-// holding its body, and run by walking that tree, recursing into each loop.
-
 namespace brainfuck_recursion;
 
 import std;
@@ -8,14 +5,6 @@ import bench;
 
 enum Op { Dec, Inc, Prev, Next, Print, Loop { body: Op[:] } }
 
-// The tape grows to the right as the head reaches its end.
-//
-// Every operation indexes the tape at `pos`, as the other implementations
-// do, for the sake of comparing like with like. This is not idiomatic Goose:
-// a reference into a grow-only array stays valid as it grows, so we would
-// keep a reference to the current cell, moved only by `<` and `>`, and
-// dispatch on the op with one case function per variant, which runs this
-// benchmark about 1.2x faster.
 struct Tape { pos: i64, tape: u8[>..] }
 
 fn new_tape() -> Tape { Tape { pos: 0, tape: [0] } }
@@ -37,11 +26,6 @@ fn next(t: Tape&) {
 
 struct Program { ops: Op[:] }
 
-// The program's top level and every loop body are each a run of ops in
-// `op_pool`, which the caller owns, added once the run's closing bracket is
-// parsed. A recursive function cannot keep a growable array of its own
-// across its recursive calls, so `parse` collects the ops of the bodies
-// still being parsed on the shared `pending` stack.
 fn new_program(code: const u8[:], op_pool: Op[>..]&, pending: Op[>..<]&) -> Program {
     var pos = 0;
     return Program { ops: parse(code, pos, op_pool, pending) };
@@ -76,7 +60,6 @@ fn run(p: Program&) -> i64 {
     return result;
 }
 
-// `result` wraps on overflow, as signed arithmetic does in a release build.
 recursive fn execute(p: Program&, program: Op[:], tape: Tape&, result: i64&) {
     for op in program {
         match op {
@@ -99,11 +82,24 @@ fn run_text(text: const u8[:]) -> i64 {
     return program.run();
 }
 
-fn run(b: Bench&) -> u32 {
-    let text = config_s(b.name, "program");
-    let warmup_text = config_s(b.name, "warmup_program");
-    var result_val: u32 = 0;
-    fn warmup(i: i64) { run_text(warmup_text); }
-    measure_with(b, warmup) { i => result_val += run_text(text) as! u32; };
-    return result_val;
+struct BrainfuckRecursion { text: const u8[:], warmup_text: const u8[:], result_val: u32 }
+
+fn new_brainfuck_recursion() -> BrainfuckRecursion {
+    BrainfuckRecursion {
+        text: config_s("Brainfuck::Recursion", "program"),
+        warmup_text: config_s("Brainfuck::Recursion", "warmup_program"),
+        result_val: 0,
+    }
 }
+
+fn prepare(s: BrainfuckRecursion&) {}
+
+fn warmup(s: BrainfuckRecursion&, iterations: i64) {
+    for i in iterations { run_text(s.warmup_text); }
+}
+
+fn run(s: BrainfuckRecursion&, iteration_id: i64) {
+    s.result_val += run_text(s.text) as! u32;
+}
+
+fn checksum(s: BrainfuckRecursion&) -> u32 { s.result_val }

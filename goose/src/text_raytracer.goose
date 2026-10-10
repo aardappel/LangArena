@@ -1,15 +1,9 @@
-// Etc::TextRaytracer: one ray per character cell of a w x h grid into a scene
-// of three spheres, the first sphere hit shaded to a character of an ASCII
-// ramp; the checksum adds up the characters.
-
 namespace text_raytracer;
 
 import std;
 import math;
 import bench;
 
-// The language's elementwise `+` and `-` on structs of floats are the
-// reference's add and sub.
 struct Vector { x: f64, y: f64, z: f64 }
 
 fn scale(v: Vector, s: f64) -> Vector { Vector { v.x * s, v.y * s, v.z * s } }
@@ -53,7 +47,6 @@ fn shade_pixel(ray: Ray, obj: Sphere, tval: f64) -> i64 {
     return floor(col * 6.0) as i64;
 }
 
-// The distance along `ray` to where it enters the sphere, if it does.
 fn intersect_sphere(ray: Ray, center: Vector, radius: f64) -> f64, bool {
     let l = center - ray.orig;
     let tca = l.dot(ray.dir);
@@ -84,49 +77,54 @@ fn diffuse_shading(pi: Vector, obj: Sphere, light: Light) -> Color {
     return light_color + obj_color;
 }
 
-fn run(b: Bench&) -> u32 {
-    let w = config_i64(b.name, "w");
-    let h = config_i64(b.name, "h");
-    var result_val: u32 = 0;
+struct TextRaytracer { w: i32, h: i32, result_val: u32 }
 
-    measure(b) {
-        let fw = w as f64;
-        let fh = h as f64;
-
-        for j in h {
-            for i in w {
-                let fi = i as f64;
-                let fj = j as f64;
-
-                let ray = Ray {
-                    orig: Vector { 0.0, 0.0, 0.0 },
-                    dir: Vector { (fi - fw / 2.0) / fw, (fj - fh / 2.0) / fh, 1.0 }.normalize(),
-                };
-
-                // An optional is a nullable reference rather than a value, so
-                // the hit found, if any, is a Hit and a flag.
-                var hit = Hit { .. };
-                var has_hit = false;
-
-                for obj in SCENE {
-                    let tval, found = intersect_sphere(ray, obj.center, obj.radius);
-                    if found {
-                        hit = Hit { obj: obj, value: tval };
-                        has_hit = true;
-                        break;
-                    }
-                }
-
-                let pixel: u8 = if has_hit {
-                    let idx = shade_pixel(ray, hit.obj, hit.value);
-                    if idx < LUT.len { LUT[idx] } else { ' ' }
-                } else {
-                    ' '
-                };
-
-                result_val += pixel;
-            }
-        }
-    };
-    return result_val;
+fn new_text_raytracer() -> TextRaytracer {
+    TextRaytracer {
+        w: config_i64("Etc::TextRaytracer", "w") as i32,
+        h: config_i64("Etc::TextRaytracer", "h") as i32,
+        result_val: 0,
+    }
 }
+
+fn prepare(s: TextRaytracer&) {}
+
+fn run(s: TextRaytracer&, iteration_id: i64) {
+    let fw = s.w as f64;
+    let fh = s.h as f64;
+
+    for j in s.h {
+        for i in s.w {
+            let fi = i as f64;
+            let fj = j as f64;
+
+            let ray = Ray {
+                orig: Vector { 0.0, 0.0, 0.0 },
+                dir: Vector { (fi - fw / 2.0) / fw, (fj - fh / 2.0) / fh, 1.0 }.normalize(),
+            };
+
+            var hit = Hit { .. };
+            var has_hit = false;
+
+            for obj in SCENE {
+                let tval, found = intersect_sphere(ray, obj.center, obj.radius);
+                if found {
+                    hit = Hit { obj: obj, value: tval };
+                    has_hit = true;
+                    break;
+                }
+            }
+
+            let pixel: u8 = if has_hit {
+                let idx = shade_pixel(ray, hit.obj, hit.value);
+                if idx < LUT.len { LUT[idx] } else { ' ' }
+            } else {
+                ' '
+            };
+
+            s.result_val += pixel;
+        }
+    }
+}
+
+fn checksum(s: TextRaytracer&) -> u32 { s.result_val }

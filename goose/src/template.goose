@@ -1,7 +1,3 @@
-// Template::Regex and Template::Parse: render an HTML template by replacing
-// its {{ NAME }} placeholders with the values of a map, once with a regular
-// expression and once with a hand-written scan.
-
 namespace template;
 
 import std;
@@ -15,17 +11,31 @@ let LAST_NAMES = ["Smith", "Johnson", "Brown", "Taylor", "Wilson", "Davis", "Mil
 let CITIES = ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "San Francisco"];
 let LOREM = "Lorem {ipsum} dolor {sit} amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore {et} dolore magna aliqua. ";
 
-// `prefix` and then i, added to `keys`; the slice of it that holds them.
+type Vars = dictionary<const u8[:], const u8[:]>;
+
+struct TemplateBase {
+    count: i64,
+    checksum: u32,
+    text: u8[>..]&,
+    keys: u8[>..]&,
+    vars: Vars&,
+    rendered: u8[>..],
+}
+
+fn new_base(count: i64, text: u8[>..]&, keys: u8[>..]&, vars: Vars&) -> TemplateBase {
+    TemplateBase { count: count, checksum: 0, text: text, keys: keys, vars: vars, rendered: [] }
+}
+
 fn key(keys: u8[>..]&, prefix: u8[:], i: i64) -> const u8[:] {
     let start = keys.len;
     format(keys, prefix, i);
     return keys[start..];
 }
 
-// The reference's TemplateBase.prepare: the template and its variables. A
-// dictionary's keys are fixed-size, so the variables' names are slices of
-// `keys`, which holds their text.
-fn prepare(count: i64, text: u8[>..]&, keys: u8[>..]&, vars: dictionary<const u8[:], const u8[:]>&) {
+fn prepare(base: TemplateBase&) {
+    let text = base.text;
+    let keys = base.keys;
+    let vars = base.vars;
     vars.clear();
     text.append("<html><body>");
     text.append("<h1>{{TITLE}}</h1>");
@@ -34,7 +44,7 @@ fn prepare(count: i64, text: u8[>..]&, keys: u8[>..]&, vars: dictionary<const u8
     text.append(LOREM);
     text.append("</p>");
     text.append("<table>");
-    for i in count {
+    for i in base.count {
         if i % 3 == 0 { text.append("<!-- {comment} -->"); }
         text.append("<tr>");
         format(text, "<td>{{ FIRST_NAME", i, " }}</td>");
@@ -50,61 +60,81 @@ fn prepare(count: i64, text: u8[>..]&, keys: u8[>..]&, vars: dictionary<const u8
     text.append("</body></html>");
 }
 
-// --- Template::Regex ------------------------------------------------------------
+fn base_checksum(base: TemplateBase&) -> u32 { base.checksum + checksum_str(base.rendered) }
 
 let TEMPLATE_REGEX = regex::compile("""\{\{(.*?)\}\}""");
 
-fn run_regex(b: Bench&) -> u32 {
-    let count = config_i64(b.name, "count");
-    var text: u8[>..] = [];
-    var keys: u8[>..] = [];
-    var vars = dictionary<const u8[:], const u8[:]> {};
-    prepare(count, text, keys, vars);
-    var rendered: u8[>..] = [];
-    var checksum: u32 = 0;
-    measure(b) {
-        rendered.clear();
-        regex::format_replaced(rendered, TEMPLATE_REGEX, text) { caps =>
-            let value = vars.get(trim(regex::group(caps, 1)));
-            if value { value } else { "" }
-        };
-        checksum += rendered.len as! u32;
-    };
-    return checksum + checksum_str(rendered);
+struct TemplateRegex { base: TemplateBase }
+
+fn new_template_regex(text: u8[>..]&, keys: u8[>..]&, vars: Vars&) -> TemplateRegex {
+    TemplateRegex { base: new_base(config_i64("Template::Regex", "count"), text, keys, vars) }
 }
 
-// --- Template::Parse ------------------------------------------------------------
+fn prepare(s: TemplateRegex&) { s.base.prepare(); }
 
-fn run_parse(b: Bench&) -> u32 {
-    let count = config_i64(b.name, "count");
+fn run(s: TemplateRegex&, iteration_id: i64) {
+    var rendered: u8[>..] = [];
+    regex::format_replaced(rendered, TEMPLATE_REGEX, s.base.text) { caps =>
+        let value = s.base.vars.get(trim(regex::group(caps, 1)));
+        if value { value } else { "" }
+    };
+
+    s.base.rendered = copy(rendered);
+    s.base.checksum += s.base.rendered.len as! u32;
+}
+
+fn checksum(s: TemplateRegex&) -> u32 { s.base.base_checksum() }
+
+fn execute_regex(b: Bench&) -> u32 {
     var text: u8[>..] = [];
     var keys: u8[>..] = [];
-    var vars = dictionary<const u8[:], const u8[:]> {};
-    prepare(count, text, keys, vars);
+    var vars = Vars {};
+    var s = new_template_regex(text, keys, vars);
+    return execute(b, s, prepare, run, checksum);
+}
+
+struct TemplateParse { base: TemplateBase }
+
+fn new_template_parse(text: u8[>..]&, keys: u8[>..]&, vars: Vars&) -> TemplateParse {
+    TemplateParse { base: new_base(config_i64("Template::Parse", "count"), text, keys, vars) }
+}
+
+fn prepare(s: TemplateParse&) { s.base.prepare(); }
+
+fn run(s: TemplateParse&, iteration_id: i64) {
+    let text = s.base.text;
+    let len = text.len;
+    let vars = s.base.vars;
     var rendered: u8[>..] = [];
-    var checksum: u32 = 0;
-    measure(b) {
-        rendered.clear();
-        let len = text.len;
-        var i = 0;
-        while i < len {
-            if i + 1 < len && text[i] == '{' && text[i + 1] == '{' {
-                var j = i + 2;
-                while j + 1 < len {
-                    if text[j] == '}' && text[j + 1] == '}' { break; }
-                    j++;
-                }
-                if j + 1 < len {
-                    let value = vars.get(trim(text[i + 2..j]));
-                    if value { rendered.append(value); }
-                    i = j + 2;
-                    continue;
-                }
+    var i = 0;
+    while i < len {
+        if i + 1 < len && text[i] == '{' && text[i + 1] == '{' {
+            var j = i + 2;
+            while j + 1 < len {
+                if text[j] == '}' && text[j + 1] == '}' { break; }
+                j++;
             }
-            rendered.push(text[i]);
-            i++;
+            if j + 1 < len {
+                let value = vars.get(trim(text[i + 2..j]));
+                if value { rendered.append(value); }
+                i = j + 2;
+                continue;
+            }
         }
-        checksum += rendered.len as! u32;
-    };
-    return checksum + checksum_str(rendered);
+        rendered.push(text[i]);
+        i++;
+    }
+
+    s.base.rendered = copy(rendered);
+    s.base.checksum += s.base.rendered.len as! u32;
+}
+
+fn checksum(s: TemplateParse&) -> u32 { s.base.base_checksum() }
+
+fn execute_parse(b: Bench&) -> u32 {
+    var text: u8[>..] = [];
+    var keys: u8[>..] = [];
+    var vars = Vars {};
+    var s = new_template_parse(text, keys, vars);
+    return execute(b, s, prepare, run, checksum);
 }

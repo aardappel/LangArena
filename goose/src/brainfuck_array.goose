@@ -1,21 +1,8 @@
-// Brainfuck::Array: a Brainfuck interpreter over a flat command array, with
-// the matching bracket of every `[` and `]` looked up in a jump table built
-// before the run.
-
 namespace brainfuck_array;
 
 import std;
 import bench;
 
-// The tape grows to the right as the head reaches its end. A growable array
-// can only be a struct's last field, so it follows `pos`.
-//
-// Tape and Program are the other implementations' classes, the commands kept
-// as their characters, for the sake of comparing like with like. This is not
-// idiomatic Goose: we would decode the program into an enum of commands with
-// u32 jump targets and keep the tape and its position in locals of the
-// interpreter loop, which ran this benchmark up to 1.4x faster (this loop is
-// unusually sensitive to code placement, so the factor varies by build).
 struct Tape { pos: i64, tape: u8[>..] }
 
 fn new_tape() -> Tape { Tape { pos: 0, tape: [0; 30000] } }
@@ -35,11 +22,8 @@ fn devance(t: Tape&) {
     if t.pos > 0 { t.pos--; }
 }
 
-// The commands are fixed once parsed; the jump table is the growable tail.
 struct Program { commands: u8[], jumps: i64[>..] }
 
-// The program in `text`, or false for one with no commands or with
-// unbalanced brackets.
 fn new_program(text: const u8[:]) -> Program, bool {
     var program = Program {
         commands: text.filter() { c =>
@@ -66,8 +50,6 @@ fn new_program(text: const u8[:]) -> Program, bool {
     return program, stack.len == 0;
 }
 
-// The program's output folded into a u32, or false for a program that reads
-// input.
 fn run(p: Program&) -> u32, bool {
     var tape = new_tape();
     var pc = 0;
@@ -94,14 +76,25 @@ fn run_program(source: const u8[:]) -> u32, bool {
     return program.run();
 }
 
-fn run(b: Bench&) -> u32 {
-    let program_text = config_s(b.name, "program");
-    let warmup_text = config_s(b.name, "warmup_program");
-    var result_val: u32 = 0;
-    fn warmup(i: i64) { run_program(warmup_text); }
-    measure_with(b, warmup) { i =>
-        let result, ok = run_program(program_text);
-        if ok { result_val += result; }
-    };
-    return result_val;
+struct BrainfuckArray { program_text: const u8[:], warmup_text: const u8[:], result_val: u32 }
+
+fn new_brainfuck_array() -> BrainfuckArray {
+    BrainfuckArray {
+        program_text: config_s("Brainfuck::Array", "program"),
+        warmup_text: config_s("Brainfuck::Array", "warmup_program"),
+        result_val: 0,
+    }
 }
+
+fn prepare(s: BrainfuckArray&) {}
+
+fn warmup(s: BrainfuckArray&, iterations: i64) {
+    for i in iterations { run_program(s.warmup_text); }
+}
+
+fn run(s: BrainfuckArray&, iteration_id: i64) {
+    let result, ok = run_program(s.program_text);
+    if ok { s.result_val += result; }
+}
+
+fn checksum(s: BrainfuckArray&) -> u32 { s.result_val }

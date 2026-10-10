@@ -1,7 +1,3 @@
-// Calculator::Interpreter: evaluates the Calculator::Ast program's tree with
-// a fresh interpreter on every run. The variables are a hash map keyed by
-// views of the names stored in the tree.
-
 namespace calculator_interpreter;
 
 import std;
@@ -9,8 +5,6 @@ import dictionary;
 import bench;
 import calculator_ast;
 
-// Rust's wrapping_add/sub/mul: unsigned arithmetic wraps in every build,
-// where signed arithmetic wraps only in release (spec 6.2).
 fn wrapping_add(a: i64, b: i64) -> i64 { (a as! u64 + b as! u64) as! i64 }
 fn wrapping_sub(a: i64, b: i64) -> i64 { (a as! u64 - b as! u64) as! i64 }
 fn wrapping_mul(a: i64, b: i64) -> i64 { (a as! u64 * b as! u64) as! i64 }
@@ -25,8 +19,6 @@ fn simple_mod(a: i64, b: i64) -> i64 {
     if b == 0 { return 0; }
     return a - simple_div(a, b) * b;
 }
-
-// --- the interpreter ------------------------------------------------------------
 
 struct Interpreter { variables: dictionary<const u8[:], i64> }
 
@@ -67,21 +59,26 @@ fn run(interp: Interpreter&, expressions: (calculator_ast::Node..&)[:]) -> i64 {
     return result;
 }
 
-// --- Calculator::Interpreter ----------------------------------------------------
+struct CalculatorInterpreter { n: i64, result_val: u32, ast: (calculator_ast::Node..&)[>..] }
 
-fn run(b: Bench&) -> u32 {
-    let n = config_i64(b.name, "operations");
-    // The tree a Calculator::Ast with this many operations builds in its
-    // prepare and first run.
-    let text = calculator_ast::generate_random_program(n);
-    var nodes: calculator_ast::Node..[>..] = [];
-    var parser = calculator_ast::new_parser(text);
-    let ast = calculator_ast::parse(parser, nodes);
-    var result_val: u32 = 0;
-    measure(b) {
-        var interpreter = new_interpreter();
-        let result = interpreter.run(ast);
-        result_val += result as! u32;
-    };
-    return result_val;
+fn new_calculator_interpreter() -> CalculatorInterpreter {
+    CalculatorInterpreter { n: config_i64("Calculator::Interpreter", "operations"), result_val: 0,
+                            ast: [] }
 }
+
+fn prepare(s: CalculatorInterpreter&, nodes: calculator_ast::Node..[>..]&) {
+    var ast_bench = calculator_ast::new_calculator_ast();
+    ast_bench.n = s.n;
+    calculator_ast::prepare(ast_bench);
+    var parser = calculator_ast::new_parser(ast_bench.text);
+    let expressions = calculator_ast::parse(parser, nodes);
+    s.ast = expressions;
+}
+
+fn run(s: CalculatorInterpreter&, iteration_id: i64) {
+    var interpreter = new_interpreter();
+    let result = interpreter.run(s.ast);
+    s.result_val += result as! u32;
+}
+
+fn checksum(s: CalculatorInterpreter&) -> u32 { s.result_val }

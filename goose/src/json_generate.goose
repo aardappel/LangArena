@@ -1,6 +1,3 @@
-// Json::Generate: serializes a list of coordinates, each with a name and a
-// small map of options, to JSON text on every run.
-
 namespace json_generate;
 
 import std;
@@ -9,24 +6,18 @@ import bench;
 import helper;
 import json;
 
-// One entry of a coordinate's options map: a string key and an (i32, bool)
-// pair, which JSON writes as a two-element array. A dictionary is resizable
-// and so can't be part of an element of the coordinates array; the map is
-// the list of its entries instead, which serializes to the same object.
 struct Opt { key: u8[varint], num: i32, flag: bool }
 
-// A coordinate's name and options are stored inline, so the whole list is
-// one block of variable-size records.
 struct Coordinate { x: f64, y: f64, z: f64, name: u8[varint], opts: Opt[varint] }
 
-// The resizable coordinates have to be the last field; they are still
-// serialized first.
-struct JsonData { info: const u8[:], coordinates: Coordinate[>..] }
+struct JsonData { coordinates: Coordinate[], info: u8[] }
+
+struct JsonGenerate { n: i64, result: u32, data: JsonData, text: u8[>..] }
 
 fn round_to_8(value: f64) -> f64 { round(value * 100000000.0) / 100000000.0 }
 
-fn prepare(n: i64) -> JsonData {
-    var data = JsonData { info: "some info", coordinates: [] };
+fn new_json_generate(n: i64 = config_i64("Json::Generate", "coords")) -> JsonGenerate {
+    var data: Coordinate[>..] = [];
     for i in n {
         let x = round_to_8(next_float(1.0));
         let y = round_to_8(next_float(1.0));
@@ -36,13 +27,19 @@ fn prepare(n: i64) -> JsonData {
         format_fixed(name, next_float(1.0), 7);
         format(name, " ", next_int(10000));
 
-        data.coordinates.push(Coordinate { x: x, y: y, z: z, name: copy(name),
-                                           opts: [Opt { key: "1", num: 1, flag: true }] });
+        data.push(Coordinate { x: x, y: y, z: z, name: copy(name),
+                               opts: [Opt { key: "1", num: 1, flag: true }] });
     }
-    return data;
+    return JsonGenerate {
+        n: n,
+        result: 0,
+        data: JsonData { coordinates: copy(data), info: "some info" },
+        text: [],
+    };
 }
 
-// What serde's derived Serialize writes, field by field, for each type.
+fn get_result(s: JsonGenerate&) -> const u8[:] { s.text }
+
 fn to_json(out: u8[>..]&, c: Coordinate&) {
     out.push('{');
     json::format_key(out, "x");
@@ -72,7 +69,6 @@ fn to_json(out: u8[>..]&, c: Coordinate&) {
     out.push('}');
 }
 
-// {"coordinates":[...],"info":"some info"}
 fn to_json(out: u8[>..]&, data: JsonData&) {
     out.push('{');
     json::format_key(out, "coordinates");
@@ -88,23 +84,17 @@ fn to_json(out: u8[>..]&, data: JsonData&) {
     out.push('}');
 }
 
-// The text the parsing benchmarks prepare: what one run of a generator of
-// n coordinates writes.
-fn text(n: i64) -> u8[>..] {
-    let data = prepare(n);
+fn to_string(data: JsonData&) -> u8[>..] {
     var out: u8[>..] = [];
     to_json(out, data);
     return out;
 }
 
-fn run(b: Bench&) -> u32 {
-    let data = prepare(config_i64(b.name, "coords"));
-    var text: u8[>..] = [];
-    var result: u32 = 0;
-    measure(b) {
-        text.clear();
-        to_json(text, data);
-        if starts_with(text, "{\"coordinates\":") { result++; }
-    };
-    return result;
+fn prepare(s: JsonGenerate&) {}
+
+fn run(s: JsonGenerate&, iteration_id: i64) {
+    s.text = to_string(s.data);
+    if starts_with(s.text, "{\"coordinates\":") { s.result++; }
 }
+
+fn checksum(s: JsonGenerate&) -> u32 { s.result }

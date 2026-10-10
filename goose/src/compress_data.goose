@@ -1,6 +1,3 @@
-// The input every Compress benchmark encodes: the configured number of bytes
-// of a repeating pattern.
-
 import std;
 
 fn generate_test_data(size: i64) -> u8[>..] {

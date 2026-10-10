@@ -1,6 +1,3 @@
-// Etc::NeuralNet: a 2-10-1 sigmoid network learning XOR by backpropagation
-// with momentum; the checksum is taken over its four outputs afterwards.
-
 namespace neural_net;
 
 import std;
@@ -15,15 +12,19 @@ const INPUT_11: f64[2] = [1.0, 1.0];
 const TARGET_0: f64[1] = [0.0];
 const TARGET_1: f64[1] = [1.0];
 
-struct Synapse { weight: f64, prev_weight: f64, source_neuron: i64, dest_neuron: i64 }
-
-fn new_synapse(source_neuron: i64, dest_neuron: i64) -> Synapse {
-    let w = next_float(1.0) * 2.0 - 1.0;
-    return Synapse { weight: w, prev_weight: w, source_neuron: source_neuron, dest_neuron: dest_neuron };
+struct Synapse {
+    weight: f64,
+    prev_weight: f64,
+    source_neuron: Neuron&<u32>,
+    dest_neuron: Neuron&<u32>,
 }
 
-// Neurons are array elements, which can't hold growable arrays, so the
-// synapse lists are limited arrays as long as the widest layer.
+fn new_synapse(synapses: Synapse[..]&, source_neuron: Neuron&, dest_neuron: Neuron&) -> Synapse& {
+    let w = next_float(1.0) * 2.0 - 1.0;
+    return synapses.push(Synapse { weight: w, prev_weight: w,
+                                   source_neuron: source_neuron, dest_neuron: dest_neuron });
+}
+
 let MAX_SYNAPSES = 10;
 
 struct Neuron {
@@ -31,8 +32,8 @@ struct Neuron {
     prev_threshold: f64,
     output: f64,
     error: f64,
-    synapses_in: i64[..MAX_SYNAPSES],
-    synapses_out: i64[..MAX_SYNAPSES],
+    synapses_in: (Synapse&<u32>)[..MAX_SYNAPSES],
+    synapses_out: (Synapse&<u32>)[..MAX_SYNAPSES],
 }
 
 let LEARNING_RATE = 1.0;
@@ -44,24 +45,35 @@ fn new_neuron() -> Neuron {
                     synapses_in: [], synapses_out: [] };
 }
 
-fn derivative(n: Neuron&) -> f64 { n.output * (1.0 - n.output) }
-
-fn calculate_output(n: Neuron&, sources: Neuron[:], synapses: Synapse[:]) {
+fn calculate_output(n: Neuron&) {
     var activation = 0.0;
-    for synapse_idx in n.synapses_in {
-        let synapse .= synapses[synapse_idx];
-        activation += synapse.weight * sources[synapse.source_neuron].output;
+    for synapse in n.synapses_in {
+        activation += synapse.weight * synapse.source_neuron.output;
     }
     activation -= n.threshold;
     n.output = 1.0 / (1.0 + exp(-activation));
 }
 
-fn update_weights(n: Neuron&, rate: f64, sources: Neuron[:], synapses: Synapse[:]) {
-    for synapse_idx in n.synapses_in {
-        let synapse .= synapses[synapse_idx];
-        let source_output = sources[synapse.source_neuron].output;
+fn derivative(n: Neuron&) -> f64 { n.output * (1.0 - n.output) }
+
+fn output_train(n: Neuron&, rate: f64, target: f64) {
+    n.error = (target - n.output) * n.derivative();
+    n.update_weights(rate);
+}
+
+fn hidden_train(n: Neuron&, rate: f64) {
+    var sum = 0.0;
+    for synapse in n.synapses_out {
+        sum += synapse.prev_weight * synapse.dest_neuron.error;
+    }
+    n.error = sum * n.derivative();
+    n.update_weights(rate);
+}
+
+fn update_weights(n: Neuron&, rate: f64) {
+    for &synapse in n.synapses_in {
         let temp_weight = synapse.weight;
-        synapse.weight += (rate * LEARNING_RATE * n.error * source_output)
+        synapse.weight += (rate * LEARNING_RATE * n.error * synapse.source_neuron.output)
                         + (MOMENTUM * (synapse.weight - synapse.prev_weight));
         synapse.prev_weight = temp_weight;
     }
@@ -71,17 +83,11 @@ fn update_weights(n: Neuron&, rate: f64, sources: Neuron[:], synapses: Synapse[:
     n.prev_threshold = temp_threshold;
 }
 
-// The network keeps every synapse in one array and neurons and synapses refer
-// to each other by index, as the Rust version does, for the sake of comparing
-// like with like. This is not idiomatic Goose: we would keep each synapse
-// inline in the neuron it feeds, linked to its source neuron by a reference,
-// with the layers as fixed arrays, which runs this benchmark about 1.2x
-// faster.
 struct NeuralNetwork {
     input_layer: Neuron[],
     hidden_layer: Neuron[],
     output_layer: Neuron[],
-    synapses: Synapse[>..],
+    synapses: Synapse[..],
 }
 
 fn new_layer(n: i64) -> Neuron[>..] {
@@ -91,29 +97,25 @@ fn new_layer(n: i64) -> Neuron[>..] {
 }
 
 fn new_network(inputs: i64, hidden: i64, outputs: i64) -> NeuralNetwork {
-    var input_layer = new_layer(inputs);
-    var hidden_layer = new_layer(hidden);
-    var output_layer = new_layer(outputs);
-    var synapses: Synapse[>..] = [];
-
-    connect(input_layer, hidden_layer, synapses);
-    connect(hidden_layer, output_layer, synapses);
-
-    return NeuralNetwork {
-        input_layer: input_layer,
-        hidden_layer: hidden_layer,
-        output_layer: output_layer,
-        synapses: synapses,
+    var net = NeuralNetwork {
+        input_layer: new_layer(inputs),
+        hidden_layer: new_layer(hidden),
+        output_layer: new_layer(outputs),
+        synapses: [..inputs * hidden + hidden * outputs],
     };
+
+    connect(net.input_layer, net.hidden_layer, net.synapses);
+    connect(net.hidden_layer, net.output_layer, net.synapses);
+
+    return net;
 }
 
-fn connect(sources: Neuron[:], destinations: Neuron[:], synapses: Synapse[>..]&) {
-    for &source, source_idx in sources {
-        for &dest, dest_idx in destinations {
-            let synapse_idx = synapses.len;
-            synapses.push(new_synapse(source_idx, dest_idx));
-            source.synapses_out.push(synapse_idx);
-            dest.synapses_in.push(synapse_idx);
+fn connect(sources: Neuron[:], destinations: Neuron[:], synapses: Synapse[..]&) {
+    for &source in sources {
+        for &dest in destinations {
+            let synapse .= new_synapse(synapses, source, dest);
+            source.synapses_out.push(synapse);
+            dest.synapses_in.push(synapse);
         }
     }
 }
@@ -123,52 +125,46 @@ fn train(net: NeuralNetwork&, inputs: f64[:], targets: f64[:]) {
 
     let RATE = 0.3;
 
-    for &neuron, i in net.output_layer {
-        neuron.error = (targets[i] - neuron.output) * neuron.derivative();
-        neuron.update_weights(RATE, net.hidden_layer, net.synapses);
-    }
-
-    for &neuron in net.hidden_layer {
-        var sum = 0.0;
-        for synapse_idx in neuron.synapses_out {
-            let synapse .= net.synapses[synapse_idx];
-            sum += synapse.prev_weight * net.output_layer[synapse.dest_neuron].error;
-        }
-        neuron.error = sum * neuron.derivative();
-        neuron.update_weights(RATE, net.input_layer, net.synapses);
-    }
+    for &neuron, i in net.output_layer { neuron.output_train(RATE, targets[i]); }
+    for &neuron in net.hidden_layer { neuron.hidden_train(RATE); }
 }
 
 fn feed_forward(net: NeuralNetwork&, inputs: f64[:]) {
     for &neuron, i in net.input_layer { neuron.output = inputs[i]; }
-    for &neuron in net.hidden_layer { neuron.calculate_output(net.input_layer, net.synapses); }
-    for &neuron in net.output_layer { neuron.calculate_output(net.hidden_layer, net.synapses); }
+    for &neuron in net.hidden_layer { neuron.calculate_output(); }
+    for &neuron in net.output_layer { neuron.calculate_output(); }
 }
 
 fn current_outputs(net: NeuralNetwork&) -> f64[>..] {
-    return net.output_layer.map() { it.output };
+    var outputs: f64[>..] = [];
+    for &neuron in net.output_layer { outputs.push(neuron.output); }
+    return outputs;
 }
 
-fn run(b: Bench&) -> u32 {
-    var xor_net = new_network(2, 10, 1);
+struct NeuralNet { xor_net: NeuralNetwork }
 
-    measure(b) {
-        for i in 1000 {
-            xor_net.train(INPUT_00, TARGET_0);
-            xor_net.train(INPUT_10, TARGET_1);
-            xor_net.train(INPUT_01, TARGET_1);
-            xor_net.train(INPUT_11, TARGET_0);
-        }
-    };
+fn new_neural_net() -> NeuralNet { NeuralNet { xor_net: new_network(2, 10, 1) } }
 
+fn prepare(s: NeuralNet&) {}
+
+fn run(s: NeuralNet&, iteration_id: i64) {
+    for i in 1000 {
+        s.xor_net.train(INPUT_00, TARGET_0);
+        s.xor_net.train(INPUT_10, TARGET_1);
+        s.xor_net.train(INPUT_01, TARGET_1);
+        s.xor_net.train(INPUT_11, TARGET_0);
+    }
+}
+
+fn checksum(s: NeuralNet&) -> u32 {
     var all_outputs: f64[>..] = [];
-    xor_net.feed_forward(INPUT_00);
-    all_outputs.append(xor_net.current_outputs());
-    xor_net.feed_forward(INPUT_01);
-    all_outputs.append(xor_net.current_outputs());
-    xor_net.feed_forward(INPUT_10);
-    all_outputs.append(xor_net.current_outputs());
-    xor_net.feed_forward(INPUT_11);
-    all_outputs.append(xor_net.current_outputs());
+    s.xor_net.feed_forward(INPUT_00);
+    all_outputs.append(s.xor_net.current_outputs());
+    s.xor_net.feed_forward(INPUT_01);
+    all_outputs.append(s.xor_net.current_outputs());
+    s.xor_net.feed_forward(INPUT_10);
+    all_outputs.append(s.xor_net.current_outputs());
+    s.xor_net.feed_forward(INPUT_11);
+    all_outputs.append(s.xor_net.current_outputs());
     return checksum_f64(sum(all_outputs));
 }

@@ -1,12 +1,3 @@
-// Calculator::Ast: a generated program of assignments over + - * / % and
-// parentheses, parsed by recursive descent into an AST on every run.
-//
-// The nodes are a variable-mode enum in a grow-only pool, each as big as its
-// variant, linked to its children by 4-byte self-relative references. A
-// variable's name is stored inline in its node. A run's node pool and parser
-// are locals of the run, so the previous run's tree is freed when the run's
-// scope ends.
-
 namespace calculator_ast;
 
 import std;
@@ -22,7 +13,13 @@ enum Node {
 
 let CHAR_EOF: u8 = 0;
 
-fn generate_random_program(n: i64) -> u8[>..] {
+struct CalculatorAst { n: i64, result_val: u32, text: u8[>..] }
+
+fn new_calculator_ast() -> CalculatorAst {
+    CalculatorAst { n: config_i64("Calculator::Ast", "operations"), result_val: 0, text: [] }
+}
+
+fn generate_random_program(s: CalculatorAst&, n: i64) -> u8[>..] {
     var result: u8[>..] = [];
     result.append("v0 = 1\n");
     for i in 10 {
@@ -52,8 +49,6 @@ fn generate_random_program(n: i64) -> u8[>..] {
     return result;
 }
 
-// --- the parser -----------------------------------------------------------------
-
 struct Parser {
     input: const u8[:],
     pos: i64,
@@ -68,12 +63,6 @@ fn new_parser(input: const u8[:]) -> Parser {
     return Parser { input: input, pos: 0, len: len, current_byte: current_byte, expressions: [] };
 }
 
-// The functions that build nodes take the pool the nodes live in, which
-// outlives the parser. It is a parameter rather than a field of the parser
-// because inside the recursive cycle the checker accepts links stored into a
-// pool handed to it that way, not into one reached through a field.
-
-// Returns the top-level expressions, which stay in the parser.
 fn parse(p: Parser&, nodes: Node..[>..]&) -> (Node..&)[:] {
     while p.current_byte != CHAR_EOF {
         p.skip_whitespace();
@@ -199,24 +188,23 @@ fn is_whitespace(p: Parser&, byte: u8) -> bool {
     byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r'
 }
 
-// --- Calculator::Ast ------------------------------------------------------------
-
-fn run(b: Bench&) -> u32 {
-    let n = config_i64(b.name, "operations");
-    let text = generate_random_program(n);
-    var result_val: u32 = 0;
-    measure(b) {
-        var nodes: Node..[>..] = [];
-        var parser = new_parser(text);
-        let expressions = parser.parse(nodes);
-        result_val += expressions.len as! u32;
-
-        if expressions.len > 0 {
-            match expressions[expressions.len - 1] {
-                Assignment &a => { result_val += checksum_str(a.name); },
-                _ => {},
-            }
-        }
-    };
-    return result_val;
+fn prepare(s: CalculatorAst&) {
+    let text = s.generate_random_program(s.n);
+    s.text = copy(text);
 }
+
+fn run(s: CalculatorAst&, iteration_id: i64) {
+    var nodes: Node..[>..] = [];
+    var parser = new_parser(s.text);
+    let expressions = parser.parse(nodes);
+    s.result_val += expressions.len as! u32;
+
+    if expressions.len > 0 {
+        match expressions[expressions.len - 1] {
+            Assignment &a => { s.result_val += checksum_str(a.name); },
+            _ => {},
+        }
+    }
+}
+
+fn checksum(s: CalculatorAst&) -> u32 { s.result_val }

@@ -1,7 +1,3 @@
-// Etc::LogParser: thirteen regular expressions, each counted over a
-// generated web server log with the `regex` module, as the Rust version
-// counts them with the regex crate's find_iter().count().
-
 namespace log_parser;
 
 import std;
@@ -9,7 +5,6 @@ import dictionary;
 import bench;
 import regex;
 
-// A name and its regular expression; the reference's (&str, Regex) tuple.
 struct Pattern { name: const u8[:], regex: regex::Regex }
 
 let PATTERNS = [
@@ -28,9 +23,6 @@ let PATTERNS = [
     Pattern { "peak_hours", regex::compile("""\[\d+/\w+/\d+:1[3-7]:\d+:\d+ [+\-]\d+\]""") },
 ];
 
-// "192.168.1.1" to "192.168.1.255", each in a limited array, as the elements
-// of an indexable array are fixed-size; an IPv4 address takes at most 15
-// characters.
 let IPS = generate_ips();
 
 fn generate_ips() -> u8[..15][>..] {
@@ -65,17 +57,22 @@ fn generate_log_line(log: u8[>..]&, i: i64) {
            "\" \"", AGENTS[i % AGENTS.len], "\"\n");
 }
 
-fn run(b: Bench&) -> u32 {
-    let lines_count = config_i64(b.name, "lines_count");
-    var log: u8[>..] = [];
-    for i in lines_count { generate_log_line(log, i); }
-    var checksum: u32 = 0;
-    measure(b) {
-        var matches = dictionary<const u8[:], i64> {};
-        for p in PATTERNS { matches.insert(p.name, regex::count(p.regex, log)); }
-        var total = 0;
-        matches.each() { name, count => total += count; };
-        checksum += total as! u32;
-    };
-    return checksum;
+struct LogParser { lines_count: i64, checksum_val: u32, log: u8[>..] }
+
+fn new_log_parser() -> LogParser {
+    LogParser { lines_count: config_i64("Etc::LogParser", "lines_count"), checksum_val: 0, log: [] }
 }
+
+fn prepare(s: LogParser&) {
+    for i in s.lines_count { generate_log_line(s.log, i); }
+}
+
+fn run(s: LogParser&, iteration_id: i64) {
+    var matches = dictionary<const u8[:], i64> {};
+    for p in PATTERNS { matches.insert(p.name, regex::count(p.regex, s.log)); }
+    var total = 0;
+    matches.each() { name, count => total += count; };
+    s.checksum_val += total as! u32;
+}
+
+fn checksum(s: LogParser&) -> u32 { s.checksum_val }
