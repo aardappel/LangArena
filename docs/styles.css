@@ -144,7 +144,13 @@ body {
 .results-table .lang_js { background: #F7DF1E; color: #000000; }
 .results-table .lang_javascript { background: #F7DF1E; color: #000000; }
 
-
+td.speed_bad {
+  background: #000000bf;
+  color: #fff;
+  text-decoration: line-through;
+  text-decoration-color: black;
+  text-decoration-thickness: 1px;
+}
 td.speed_0 { background: #1b5e20e3; font-weight: bold; color: white; }
 td.speed_1 { background: #4caf50aa; }
 td.speed_2 { background: #8bc34aaa; }

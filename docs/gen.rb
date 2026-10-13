@@ -88,10 +88,10 @@ class Gen
     <strong>Matmul::Single</strong> — single-threaded naive matrix multiplication.<br>
     <strong>Matmul::T4/T8/T16</strong> — multi-threaded versions (4/8/16 threads).<br>
     <br>
-    Heatmap visualization: greener = faster, redder = slower (relative performance within each benchmark).
+    Heatmap visualization: greener = faster, redder = slower (relative performance within each benchmark), black = incomparable.
 
 <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px 15px; margin: 10px 0; border-radius: 4px;">
-  <strong>Note on <code>Mojo</code>:</strong> this is a young language, and many tests use Python interop instead of native implementations, simply because I can't compile libraries for JSON, Regex, Csv or implement certain tasks better due to missing language features. Performance is still very raw.
+  <strong>Note on <code>Mojo</code>:</strong> this is a young language, and many tests use Python interop instead of native implementations (marked black), simply because I can't compile libraries for JSON, Regex, Csv. Performance is still very raw.
 </div>
 <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px 15px; margin: 10px 0; border-radius: 4px;">
   <strong>Note on <code>Go</code>:</strong> Go suffers from regex benchmarks — see my <a href="https://www.reddit.com/r/golang/comments/1rr2evh/why_is_gos_regex_so_slow/">post</a> on this.
@@ -250,7 +250,28 @@ Heatmap: greener = faster, redder = slower.
       summary['data'] = summaries.map { |s| s / @tests.size }.map { |v| format_float v }
     end
 
-    {map: m, up_header: runs, left_header: @tests, summary: summary, lang: :up, first_row: "Test"}
+    knows_bads = [
+      %w{mojo CSV::Parse}, 
+      %w{mojo Json::Generate}, 
+      %w{mojo Json::ParseDom}, 
+      %w{mojo Json::ParseMapping}, 
+      %w{mojo Etc::LogParser}, 
+      %w{mojo Template::Regex}, 
+    ]
+
+    bads = Hash.new { |h, k| h[k] = [] } 
+
+    @tests.each_with_index do |test, tindex|
+      runs.each_with_index do |run, index|
+        if knows_bads.include?([_lang_for(run), test])
+          bads[tindex] << index
+        end
+      end
+    end
+
+    res = {map: m, up_header: runs, left_header: @tests, summary: summary, lang: :up, first_row: "Test"}
+    res[:bads] = bads unless bads.empty?
+    res
   end
 
   def source

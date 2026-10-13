@@ -3,6 +3,8 @@ function ai_analys($results) {
 <div class="benchmark-analysis">
 <h1>🔍 Comprehensive AI Analysis: Programming Language Benchmarks 2026-03-06</h1>
 
+<h2><strong>Note:</strong> these results are from 2026-03-06 and are now outdated. The data has changed since then — this analysis needs to be redone.</h2>
+
 <p><strong>Test Environment:</strong> AMD Ryzen 7 3800X (8-core/16-thread) | 78GB RAM | x86_64-linux-gnu<br>
 <strong>Scope:</strong> 20 languages · 51 benchmarks · 29 runtime configurations · 1000+ data points</p>
 

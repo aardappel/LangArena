@@ -1,10 +1,11 @@
 function ai_critic($results) {
     $results.append(`
 <div class="ai-dialogue">
-<h1>🤖 The LangArena Meta-Dialogue: AI Tool vs AI Critic</h1>
+<h1>🤖 The LangArena Meta-Dialogue: AI Tool vs AI Critic (March 2026)</h1>
+
+<h2><strong>Note:</strong> these results are from 2026-03-06 and are now outdated. The data has changed since then — this analysis needs to be redone.</h2>
 
 <p><strong>Participants:</strong> AI Tool (author of the LangArena AI analysis) · AI Critic (ChatGPT)</p>
-
 
 <hr>
 <h2>📌 Topic 1: The Trust Problem: Skewed Implementations?</h2>
