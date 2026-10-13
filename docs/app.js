@@ -255,6 +255,7 @@ function create_table($parent_div, title, data, use_color_compare = 0, group_lan
     const left_header = data.left_header;
     const lang_sticky_up = data.lang == "up";
     const lang_sticky_left = data.lang == "left";
+    const bads = data.bads ?? {};
 
     const $tr = $('<tr>');
     $thead.append($tr);
@@ -271,12 +272,13 @@ function create_table($parent_div, title, data, use_color_compare = 0, group_lan
         const line = map[i];
         const $tr = $('<tr>');
         const $td = $('<td>').text(left_header[i]);
+        const bad = bads[i] ?? [];
         $tr.append($td);
         if (lang_sticky_left) $td.attr('class', 'lang_' + run_name_to_lang_class_name(left_header[i]));
         
         let speed_class;
         if (use_color_compare == 1) {
-            speed_class = createSpeedClassFunction(line);
+            speed_class = createSpeedClassFunction(line, false);
         } else if (use_color_compare == 2) {
             speed_class = createSpeedClassFunction(line, true);
         }
@@ -284,7 +286,10 @@ function create_table($parent_div, title, data, use_color_compare = 0, group_lan
         for (let j = 0; j < line.length; j++) {
             const v = line[j];
             const $td = $('<td>', {title: `${left_header[i]}[${up_header[j]}]: ${v}`}).html(v);
-            if (use_color_compare != 0) $td.attr('class', speed_class(v));
+            if (use_color_compare != 0) { 
+                if (bad.includes(j)) $td.attr('class', "speed_bad");
+                else $td.attr('class', speed_class(v));
+            }
             $tr.append($td);
         };
         $tbody.append($tr);
@@ -300,7 +305,7 @@ function create_table($parent_div, title, data, use_color_compare = 0, group_lan
         const summaries = data.summary.data;
 
         if (use_color_compare == 1) {
-            speed_class = createSpeedClassFunction(summaries);
+            speed_class = createSpeedClassFunction(summaries, false);
         } else if (use_color_compare == 2) {
             speed_class = createSpeedClassFunction(summaries, true);
         }
