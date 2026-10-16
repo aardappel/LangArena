@@ -59,20 +59,26 @@ fn run(interp: Interpreter&, expressions: (calculator_ast::Node..&)[:]) -> i64 {
     return result;
 }
 
-struct CalculatorInterpreter { n: i64, result_val: u32, ast: (calculator_ast::Node..&)[>..] }
-
-fn new_calculator_interpreter() -> CalculatorInterpreter {
-    CalculatorInterpreter { n: config_i64("Calculator::Interpreter", "operations"), result_val: 0,
-                            ast: [] }
+struct CalculatorInterpreter {
+    n: i64,
+    result_val: u32,
+    text: u8[>..]&,
+    nodes: calculator_ast::Node..[>..]&,
+    ast: (calculator_ast::Node..&)[>..],
 }
 
-fn prepare(s: CalculatorInterpreter&, nodes: calculator_ast::Node..[>..]&) {
-    var ast_bench = calculator_ast::new_calculator_ast();
+fn new_calculator_interpreter(text: u8[>..]&, nodes: calculator_ast::Node..[>..]&) -> CalculatorInterpreter {
+    CalculatorInterpreter { n: config_i64("Calculator::Interpreter", "operations"), result_val: 0,
+                            text: text, nodes: nodes, ast: [] }
+}
+
+fn prepare(s: CalculatorInterpreter&) {
+    var ast_bench = calculator_ast::new_calculator_ast(s.text, s.nodes);
     ast_bench.n = s.n;
     calculator_ast::prepare(ast_bench);
-    var parser = calculator_ast::new_parser(ast_bench.text);
-    let expressions = calculator_ast::parse(parser, nodes);
-    s.ast = expressions;
+    s.ast = [];
+    calculator_ast::run(ast_bench, 0);
+    s.ast = copy(ast_bench.expressions);
 }
 
 fn run(s: CalculatorInterpreter&, iteration_id: i64) {

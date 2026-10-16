@@ -13,10 +13,17 @@ enum Node {
 
 let CHAR_EOF: u8 = 0;
 
-struct CalculatorAst { n: i64, result_val: u32, text: u8[>..] }
+struct CalculatorAst {
+    n: i64,
+    result_val: u32,
+    text: u8[>..]&,
+    nodes: Node..[>..]&,
+    expressions: (Node..&)[>..],
+}
 
-fn new_calculator_ast() -> CalculatorAst {
-    CalculatorAst { n: config_i64("Calculator::Ast", "operations"), result_val: 0, text: [] }
+fn new_calculator_ast(text: u8[>..]&, nodes: Node..[>..]&) -> CalculatorAst {
+    CalculatorAst { n: config_i64("Calculator::Ast", "operations"), result_val: 0, text: text, nodes: nodes,
+                    expressions: [] }
 }
 
 fn generate_random_program(s: CalculatorAst&, n: i64) -> u8[>..] {
@@ -194,13 +201,14 @@ fn prepare(s: CalculatorAst&) {
 }
 
 fn run(s: CalculatorAst&, iteration_id: i64) {
-    var nodes: Node..[>..] = [];
+    s.expressions = [];
+    s.nodes = [];
     var parser = new_parser(s.text);
-    let expressions = parser.parse(nodes);
-    s.result_val += expressions.len as! u32;
+    s.expressions.append(parser.parse(s.nodes));
+    s.result_val += s.expressions.len as! u32;
 
-    if expressions.len > 0 {
-        match expressions[expressions.len - 1] {
+    if s.expressions.len > 0 {
+        match s.expressions[s.expressions.len - 1] {
             Assignment &a => { s.result_val += checksum_str(a.name); },
             _ => {},
         }

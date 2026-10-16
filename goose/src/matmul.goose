@@ -19,12 +19,12 @@ fn matgen(pool: f64[>..]&, n: i64) -> (f64[:])[>..] {
     return a;
 }
 
-fn transpose(pool: f64[>..]&, b: (f64[:])[:], first: i64, last: i64) -> (f64[:])[>..] {
+fn transpose(pool: f64[>..]&, b: (f64[:])[:]) -> (f64[:])[>..] {
     let n = b.len;
-    var b_t = new_matrix(pool, last - first, n);
+    var b_t = new_matrix(pool, n, n);
     for i in n {
-        for j in first..last {
-            b_t[j - first][i] = b[i][j];
+        for j in n {
+            b_t[j][i] = b[i][j];
         }
     }
     return b_t;
@@ -32,7 +32,7 @@ fn transpose(pool: f64[>..]&, b: (f64[:])[:], first: i64, last: i64) -> (f64[:])
 
 fn matmul_sequential(pool: f64[>..]&, a: (f64[:])[:], b: (f64[:])[:]) -> (f64[:])[>..] {
     let n = a.len;
-    let b_t = transpose(pool, b, 0, n);
+    let b_t = transpose(pool, b);
 
     var c = new_matrix(pool, n, n);
 
@@ -55,7 +55,7 @@ fn matmul_sequential(pool: f64[>..]&, a: (f64[:])[:], b: (f64[:])[:]) -> (f64[:]
     return c;
 }
 
-struct Job { first: i64, last: i64 }
+struct Job { first: i64, last: i64, b_t: f64[] }
 struct Columns { first: i64, last: i64, cells: f64[] }
 
 fn flatten(m: (f64[:])[:]) -> f64[>..] {
@@ -70,18 +70,17 @@ fn rows_of(cells: f64[:], rows: i64, cols: i64) -> (f64[:])[>..] {
     return m;
 }
 
-thread_fn worker(a_cells: f64[], b_cells: f64[], n: i64) {
+thread_fn worker(a_cells: f64[], n: i64) {
     let a = rows_of(a_cells, n, n);
-    let b = rows_of(b_cells, n, n);
 
     loop {
         let job = qget<Job>();
         guard job.first >= 0 else { break; }
 
-        reusable[] var pool: f64[>..] = [];
-        let b_t = transpose(pool, b, job.first, job.last);
-
         let width = job.last - job.first;
+        let b_t = rows_of(job.b_t, width, n);
+
+        reusable[] var pool: f64[>..] = [];
         var c = new_matrix(pool, n, width);
 
         for i in n {
@@ -104,20 +103,24 @@ thread_fn worker(a_cells: f64[], b_cells: f64[], n: i64) {
     }
 }
 
-fn start_workers(a: (f64[:])[:], b: (f64[:])[:], num_threads: i64) -> i64[>..] {
+fn start_workers(a: (f64[:])[:], num_threads: i64) -> i64[>..] {
     var workers: i64[>..] = [];
-    for t in num_threads { workers.push(thread_spawn(worker, flatten(a), flatten(b), a.len)); }
+    for t in num_threads { workers.push(thread_spawn(worker, flatten(a), a.len)); }
     return workers;
 }
 
-fn matmul_parallel(pool: f64[>..]&, n: i64, num_threads: i64) -> (f64[:])[>..] {
+fn matmul_parallel(pool: f64[>..]&, a: (f64[:])[:], b: (f64[:])[:], num_threads: i64) -> (f64[:])[>..] {
+    let n = a.len;
+    let b_t = transpose(pool, b);
+
+    var c = new_matrix(pool, n, n);
+
     let columns_per_worker = (n + num_threads - 1) / num_threads;
     for worker_id in num_threads {
         let first = min(worker_id * columns_per_worker, n);
-        qput(Job { first: first, last: min(first + columns_per_worker, n) });
+        let last = min(first + columns_per_worker, n);
+        qput(Job { first: first, last: last, b_t: flatten(b_t[first..last]) });
     }
-
-    var c = new_matrix(pool, n, n);
 
     for t in num_threads {
         let part = qget<Columns>();
@@ -136,11 +139,11 @@ fn new_base(pool: f64[>..]&, name: u8[:], num_threads: i64) -> BaseMatmul {
     let n = config_i64(name, "n");
     let a = matgen(pool, n);
     let b = matgen(pool, n);
-    return BaseMatmul { n: n, a: a, b: b, result_val: 0, workers: start_workers(a, b, num_threads) };
+    return BaseMatmul { n: n, a: a, b: b, result_val: 0, workers: start_workers(a, num_threads) };
 }
 
 fn stop_workers(base: BaseMatmul&) {
-    for id in base.workers { qput(Job { first: -1, last: -1 }); }
+    for id in base.workers { qput(Job { first: -1, last: -1, b_t: [] }); }
     for id in base.workers { thread_wait(id); }
 }
 
@@ -167,7 +170,7 @@ fn prepare(s: Matmul4T&) {}
 
 fn run(s: Matmul4T&, iteration_id: i64) {
     reusable[] var pool: f64[>..] = [];
-    let c = matmul_parallel(pool, s.base.n, 4);
+    let c = matmul_parallel(pool, s.base.a, s.base.b, 4);
     let center_value = c[s.base.n >> 1][s.base.n >> 1];
     s.base.result_val += checksum_f64(center_value);
 }
@@ -185,7 +188,7 @@ fn prepare(s: Matmul8T&) {}
 
 fn run(s: Matmul8T&, iteration_id: i64) {
     reusable[] var pool: f64[>..] = [];
-    let c = matmul_parallel(pool, s.base.n, 8);
+    let c = matmul_parallel(pool, s.base.a, s.base.b, 8);
     let center_value = c[s.base.n >> 1][s.base.n >> 1];
     s.base.result_val += checksum_f64(center_value);
 }
@@ -203,7 +206,7 @@ fn prepare(s: Matmul16T&) {}
 
 fn run(s: Matmul16T&, iteration_id: i64) {
     reusable[] var pool: f64[>..] = [];
-    let c = matmul_parallel(pool, s.base.n, 16);
+    let c = matmul_parallel(pool, s.base.a, s.base.b, 16);
     let center_value = c[s.base.n >> 1][s.base.n >> 1];
     s.base.result_val += checksum_f64(center_value);
 }
